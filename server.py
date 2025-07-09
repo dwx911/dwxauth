@@ -101,6 +101,48 @@ async def verify(ctx):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
+async def pullall(ctx):
+    guild_id = ctx.guild.id
+    tokens = load_tokens()
+    if not tokens:
+        await ctx.send("❌ No users have verified.")
+        return
+
+    headers = {
+        "Authorization": f"Bot {BOT_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    success = []
+    failed = []
+
+    for user_id, token_data in tokens.items():
+        json_data = {
+            "access_token": token_data["access_token"]
+        }
+
+        r = requests.put(
+            f"https://discord.com/api/v10/guilds/{guild_id}/members/{user_id}",
+            headers=headers,
+            json=json_data
+        )
+
+        if r.status_code in (201, 204):
+            success.append(f"<@{user_id}>")
+        else:
+            failed.append(f"<@{user_id}> ({r.status_code})")
+
+    result_msg = ""
+    if success:
+        result_msg += f"✅ Pulled {len(success)} users:\n" + "\n".join(success) + "\n\n"
+    if failed:
+        result_msg += f"❌ Failed to pull {len(failed)} users:\n" + "\n".join(failed)
+
+    await ctx.send(result_msg)
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
 async def joinuser(ctx, user_id: int, guild_id: int):
     tokens = load_tokens()
     token_data = tokens.get(str(user_id))
