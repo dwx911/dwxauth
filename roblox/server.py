@@ -1,53 +1,74 @@
-from flask import Flask, request, redirect
-import requests
-import json
 import os
+import discord
+from discord.ext import commands
+import json
+import requests
 
-app = Flask(__name__)
-
+TOKEN = os.environ.get("BOT_TOKEN")
 CLIENT_ID = os.environ.get("CLIENT_ID")
-CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
-REDIRECT_URI = os.environ.get("REDIRECT_URI")  # Must match your Render URL exactly
+REDIRECT_URI = os.environ.get("REDIRECT_URI")
 
-def save_token(user_id, token_data):
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+def load_tokens():
     try:
         with open("tokens.json", "r") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
+            return json.load(f)
+    except:
+        return {}
 
-    data[str(user_id)] = token_data
-    with open("tokens.json", "w") as f:
-        json.dump(data, f, indent=4)
+@bot.command()
+async def verify(ctx):
+    auth_url = (
+        f"https://discord.com/oauth2/authorize?client_id={CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code&scope=identify%20guilds.join"
+    )
+    try:
+        await ctx.author.send(f"Click this link to verify and authorize: {auth_url}")
+        await ctx.send("I've sent you a DM with the verification link!")
+    except discord.Forbidden:
+        await ctx.send("I can't DM you. Please enable DMs and try again.")
 
-@app.route("/oauth/callback")
-def callback():
-    code = request.args.get("code")
-    if not code:
-        return "No code provided", 400
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def joinuser(ctx, user_id: int, guild_id: int):
+    tokens = load_tokens()
+    token_data = tokens.get(str(user_id))
+    if not token_data:
+        await ctx.send("That user hasn't verified or I don't have their token.")
+        return
 
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-        "scope": "identify guilds.join"
+    headers = {
+        "Authorization": f"Bot {TOKEN}",
+        "Content-Type": "application/json"
     }
 
-    r = requests.post("https://discord.com/api/oauth2/token", data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
-    if r.status_code != 200:
-        return f"Token exchange failed: {r.text}", 400
+    json_data = {
+        "access_token": token_data["access_token"]
+    }
 
-    tokens = r.json()
-    user_info = requests.get("https://discord.com/api/users/@me", headers={
-        "Authorization": f"Bearer {tokens['access_token']}"
-    }).json()
+    r = requests.put(
+        f"https://discord.com/api/v10/guilds/{guild_id}/members/{user_id}",
+        headers=headers,
+        json=json_data
+    )
 
-    save_token(user_info["id"], tokens)
-    return f"✅ Verification complete: {user_info['username']}"
+    if r.status_code in (201, 204):
+        await ctx.send(f"✅ User <@{user_id}> added to the server.")
+    else:
+        await ctx.send(f"❌ Failed to add user: {r.status_code} - {r.text}")
 
-@app.route("/")
-def index():
-    return "OAuth Server Online"
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def listverified(ctx):
+    tokens = load_tokens()
+    if not tokens:
+        await ctx.send("No users have verified yet.")
+        return
 
+    verified_users = "\n".join([f"<@{uid}>" for uid in tokens.keys()])
+    await ctx.send(f"Verified users:\n{verified_users}")
+
+bot.run(TOKEN)
