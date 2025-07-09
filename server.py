@@ -2,18 +2,23 @@ import os
 import json
 import requests
 import threading
+import logging
 
 from flask import Flask, request
 import discord
 from discord.ext import commands
 
-# === Flask OAuth Server ===
-app = Flask(__name__)
-
+# === ENV VARIABLES ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CLIENT_ID = os.environ.get("CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("REDIRECT_URI")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+# === LOGGING ===
+logging.basicConfig(level=logging.INFO)
+
+# === FLASK SETUP ===
+app = Flask(__name__)
 
 def save_token(user_id, token_data):
     try:
@@ -28,7 +33,7 @@ def save_token(user_id, token_data):
 
 @app.route("/")
 def home():
-    return "✅ Discord OAuth & Bot Server is running."
+    return "✅ Discord bot and OAuth2 server running."
 
 @app.route("/oauth/callback")
 def callback():
@@ -46,8 +51,8 @@ def callback():
     }
 
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    res = requests.post("https://discord.com/api/oauth2/token", data=payload, headers=headers)
 
+    res = requests.post("https://discord.com/api/oauth2/token", data=payload, headers=headers)
     if res.status_code != 200:
         return f"Failed to exchange code: {res.text}", 400
 
@@ -59,15 +64,15 @@ def callback():
 
     save_token(user_info["id"], token_data)
 
-    return f"✅ {user_info['username']} verified successfully."
+    return f"✅ {user_info['username']} verified successfully!"
 
-# === Start Flask in a background thread ===
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
-# === Discord Bot Setup ===
+# === DISCORD BOT SETUP ===
 intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 def load_tokens():
@@ -76,6 +81,10 @@ def load_tokens():
             return json.load(f)
     except:
         return {}
+
+@bot.event
+async def on_ready():
+    print(f"✅ Logged in as {bot.user}")
 
 @bot.command()
 async def verify(ctx):
@@ -86,9 +95,9 @@ async def verify(ctx):
     )
     try:
         await ctx.author.send(f"Click this link to verify: {auth_url}")
-        await ctx.send("Check your DMs to verify!")
+        await ctx.send("📬 Check your DMs!")
     except discord.Forbidden:
-        await ctx.send("I can't DM you. Enable DMs and try again.")
+        await ctx.send("❌ I can't DM you. Please enable DMs.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -96,7 +105,7 @@ async def joinuser(ctx, user_id: int, guild_id: int):
     tokens = load_tokens()
     token_data = tokens.get(str(user_id))
     if not token_data:
-        await ctx.send("User not verified or token missing.")
+        await ctx.send("❌ User not verified.")
         return
 
     headers = {
@@ -115,7 +124,7 @@ async def joinuser(ctx, user_id: int, guild_id: int):
     )
 
     if r.status_code in (201, 204):
-        await ctx.send(f"✅ <@{user_id}> added to the server.")
+        await ctx.send(f"✅ <@{user_id}> added to server.")
     else:
         await ctx.send(f"❌ Failed: {r.status_code} - {r.text}")
 
@@ -127,10 +136,10 @@ async def listverified(ctx):
         await ctx.send("No verified users.")
         return
 
-    verified = "\n".join([f"<@{uid}>" for uid in tokens.keys()])
-    await ctx.send(f"Verified users:\n{verified}")
+    users = "\n".join([f"<@{uid}>" for uid in tokens.keys()])
+    await ctx.send(f"Verified Users:\n{users}")
 
-# === Main startup ===
+# === MAIN ===
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     bot.run(BOT_TOKEN)
